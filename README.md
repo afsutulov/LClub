@@ -41,7 +41,7 @@ The faster the player finishes, the better.
 ## Controls
 
 | Action         | Key / Mouse        |
-|---4-------------|--------------------|
+|----------------|--------------------|
 | Start game     | **Enter**          |
 | New game       | **N**              |
 | Fullscreen     | **F11**            |
