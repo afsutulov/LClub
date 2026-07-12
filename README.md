@@ -41,7 +41,7 @@ The faster the player finishes, the better.
 ## Controls
 
 | Action         | Key / Mouse        |
-|----------------|--------------------|
+|---4-------------|--------------------|
 | Start game     | **Enter**          |
 | New game       | **N**              |
 | Fullscreen     | **F11**            |
@@ -113,7 +113,8 @@ No external files are required after compilation.
 
 ## Building
 
-```go mod tidy
+```bash
+go mod tidy
 go mod build
 ```
 
