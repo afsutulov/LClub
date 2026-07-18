@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=LClub
+Comment=Find all pairs
+Exec=LClub
+Icon=lclub
+Terminal=false
+Categories=Game;
