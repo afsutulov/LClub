@@ -51,10 +51,12 @@ type Game struct {
 	resultMS               int64
 	hintUntil              time.Time
 	fullscreen             bool
-	logo                   *ebiten.Image
+	splash                 *ebiten.Image
+	windowIcons            []image.Image
+	bgGame, bgWin          *ebiten.Image
 }
 
-func loadImage(path string) *ebiten.Image {
+func decodeImage(path string) image.Image {
 	b, err := assets.ReadFile(path)
 	if err != nil {
 		panic(err)
@@ -63,13 +65,80 @@ func loadImage(path string) *ebiten.Image {
 	if err != nil {
 		panic(err)
 	}
-	return ebiten.NewImageFromImage(im)
+	return im
+}
+
+func loadImage(path string) *ebiten.Image {
+	return ebiten.NewImageFromImage(decodeImage(path))
+}
+
+// resizeIcon downscales src to size x size with a box filter. It is used to
+// prepare crisp window icons for every context (title bar, taskbar, Alt-Tab).
+func resizeIcon(src image.Image, size int) image.Image {
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, size, size))
+	sx := float64(b.Dx()) / float64(size)
+	sy := float64(b.Dy()) / float64(size)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			x0, x1 := int(float64(x)*sx), int(float64(x+1)*sx)
+			y0, y1 := int(float64(y)*sy), int(float64(y+1)*sy)
+			if x1 <= x0 {
+				x1 = x0 + 1
+			}
+			if y1 <= y0 {
+				y1 = y0 + 1
+			}
+			var r, gg, bb, a, n uint64
+			for yy := y0; yy < y1; yy++ {
+				for xx := x0; xx < x1; xx++ {
+					pr, pg, pb, pa := src.At(b.Min.X+xx, b.Min.Y+yy).RGBA()
+					r += uint64(pr)
+					gg += uint64(pg)
+					bb += uint64(pb)
+					a += uint64(pa)
+					n++
+				}
+			}
+			dst.SetRGBA(x, y, color.RGBA{
+				R: uint8(r / n >> 8),
+				G: uint8(gg / n >> 8),
+				B: uint8(bb / n >> 8),
+				A: uint8(a / n >> 8),
+			})
+		}
+	}
+	return dst
+}
+
+// newGradient pre-renders a full-screen vertical gradient once, so Draw can
+// blit a single image instead of issuing hundreds of rect draws per frame.
+func newGradient(top, bottom color.RGBA) *ebiten.Image {
+	img := ebiten.NewImage(W, H)
+	for y := 0; y < H; y += 4 {
+		t := float64(y) / float64(H)
+		c := color.RGBA{
+			R: uint8(float64(top.R) + (float64(bottom.R)-float64(top.R))*t),
+			G: uint8(float64(top.G) + (float64(bottom.G)-float64(top.G))*t),
+			B: uint8(float64(top.B) + (float64(bottom.B)-float64(top.B))*t),
+			A: 255,
+		}
+		vector.DrawFilledRect(img, 0, float32(y), W, 4, c, false)
+	}
+	return img
 }
 
 func NewGame() *Game {
 	g := &Game{mode: modeMenu, first: -1, second: -1}
 	g.back = loadImage("assets/cards/back.png")
-	g.logo = loadImage("assets/ui/logo.png")
+	g.splash = loadImage("assets/ui/splash.png")
+	icon := decodeImage("assets/ui/icon.png")
+	for _, s := range []int{16, 24, 32, 48, 64, 128, 256} {
+		g.windowIcons = append(g.windowIcons, resizeIcon(icon, s))
+	}
+	g.windowIcons = append(g.windowIcons, icon)
+	g.bgGame = newGradient(color.RGBA{2, 40, 77, 255}, color.RGBA{18, 101, 160, 255})
+	g.bgWin = newGradient(color.RGBA{4, 20, 43, 255}, color.RGBA{12, 72, 112, 255})
 	for i := 1; i <= 18; i++ {
 		g.faces = append(g.faces, loadImage(fmt.Sprintf("assets/cards/card_%02d.png", i)))
 	}
@@ -141,9 +210,9 @@ func (g *Game) Update() error {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			x, y := ebiten.CursorPosition()
 			switch {
-			case inRect(x, y, 145, 500, 410, 72):
+			case inRect(x, y, 94, 523, 500, 92):
 				g.newRound()
-			case inRect(x, y, 145, 600, 410, 72):
+			case inRect(x, y, 94, 650, 500, 92):
 				return ebiten.Termination
 			}
 		}
@@ -270,32 +339,6 @@ func min255(v int) uint8 {
 	return uint8(v)
 }
 
-func gradientBackground(dst *ebiten.Image, top, bottom color.RGBA) {
-	for y := 0; y < H; y += 4 {
-		t := float64(y) / float64(H)
-		c := color.RGBA{
-			R: uint8(float64(top.R) + (float64(bottom.R)-float64(top.R))*t),
-			G: uint8(float64(top.G) + (float64(bottom.G)-float64(top.G))*t),
-			B: uint8(float64(top.B) + (float64(bottom.B)-float64(top.B))*t),
-			A: 255,
-		}
-		vector.DrawFilledRect(dst, 0, float32(y), W, 4, c, false)
-	}
-}
-
-func drawImageContain(dst, img *ebiten.Image, x, y, w, h float64) {
-	iw, ih := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
-	scale := w / iw
-	if h/ih < scale {
-		scale = h / ih
-	}
-	op := &ebiten.DrawImageOptions{}
-	op.Filter = ebiten.FilterLinear
-	op.GeoM.Scale(scale, scale)
-	op.GeoM.Translate(x+(w-iw*scale)/2, y+(h-ih*scale)/2)
-	dst.DrawImage(img, op)
-}
-
 func (g *Game) Draw(s *ebiten.Image) {
 	s.Fill(color.RGBA{3, 11, 25, 255})
 	switch g.mode {
@@ -309,30 +352,25 @@ func (g *Game) Draw(s *ebiten.Image) {
 }
 
 func (g *Game) drawMenu(s *ebiten.Image) {
-	gradientBackground(s, color.RGBA{5, 36, 58, 255}, color.RGBA{13, 74, 61, 255})
-	for i := 0; i < 24; i++ {
-		x := float32(650 + (i%8)*125)
-		y := float32(70 + (i/8)*235)
-		vector.DrawFilledCircle(s, x, y, 105, color.RGBA{20, uint8(80 + (i%5)*14), uint8(55 + (i%4)*12), 100}, false)
-	}
-	roundedPanel(s, 75, 45, 560, 850, 28, color.RGBA{2, 18, 38, 230}, color.RGBA{55, 130, 200, 255})
-	drawImageContain(s, g.logo, 95, 95, 520, 230)
-	mx, my := ebiten.CursorPosition()
-	button(s, 145, 500, 410, 72, "NEW GAME", inRect(mx, my, 145, 500, 410, 72), true)
-	button(s, 145, 600, 410, 72, "EXIT", inRect(mx, my, 145, 600, 410, 72), false)
-	drawText(s, "ENTER - START", 118, 828, 2.8, color.RGBA{180, 210, 232, 255})
-	drawText(s, "F11 - FULLSCREEN", 365, 828, 2.5, color.RGBA{180, 210, 232, 255})
+	// The splash contains the logo, background and the framed card-fan
+	// artwork. Buttons are rendered separately so they react to the pointer.
+	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
+	op.GeoM.Scale(
+		float64(W)/float64(g.splash.Bounds().Dx()),
+		float64(H)/float64(g.splash.Bounds().Dy()),
+	)
+	s.DrawImage(g.splash, op)
 
-	// Mascot area. The whole card is fitted into the panel, so neither
-	// its top nor bottom can be clipped at any window scale.
-	roundedPanel(s, 760, 80, 720, 790, 30, color.RGBA{3, 18, 39, 170}, color.RGBA{75, 155, 218, 255})
-	drawImageContain(s, g.faces[0], 875, 135, 490, 620)
-	caption := "THE CLASSIC GAME"
-	drawText(s, caption, 1120-textWidth(caption, 3.4)/2, 795, 3.4, color.RGBA{255, 214, 90, 255})
+	// The static splash has no button artwork. The buttons below are the only
+	// visible controls and react to mouse hover.
+	mx, my := ebiten.CursorPosition()
+	button(s, 94, 523, 500, 92, "NEW GAME", inRect(mx, my, 94, 523, 500, 92), true)
+	button(s, 94, 650, 500, 92, "EXIT", inRect(mx, my, 94, 650, 500, 92), false)
 }
 
 func (g *Game) drawGame(s *ebiten.Image) {
-	gradientBackground(s, color.RGBA{2, 40, 77, 255}, color.RGBA{18, 101, 160, 255})
+	s.DrawImage(g.bgGame, nil)
 	vector.DrawFilledRect(s, 0, 0, W, 96, color.RGBA{2, 13, 29, 245}, false)
 	vector.DrawFilledRect(s, 0, 896, W, 104, color.RGBA{2, 31, 58, 245}, false)
 
@@ -354,6 +392,8 @@ func (g *Game) drawGame(s *ebiten.Image) {
 
 	now := time.Now()
 	hint := now.Before(g.hintUntil)
+	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
 	for i, c := range g.cards {
 		if c.matched {
 			continue
@@ -364,8 +404,7 @@ func (g *Game) drawGame(s *ebiten.Image) {
 		if c.faceUp || hint {
 			img = g.faces[c.pair]
 		}
-		op := &ebiten.DrawImageOptions{}
-		op.Filter = ebiten.FilterLinear
+		op.GeoM.Reset()
 		op.GeoM.Scale(c.w/float64(img.Bounds().Dx()), c.h/float64(img.Bounds().Dy()))
 		op.GeoM.Translate(c.x, c.y)
 		s.DrawImage(img, op)
@@ -383,7 +422,7 @@ func (g *Game) drawGame(s *ebiten.Image) {
 }
 
 func (g *Game) drawWin(s *ebiten.Image) {
-	gradientBackground(s, color.RGBA{4, 20, 43, 255}, color.RGBA{12, 72, 112, 255})
+	s.DrawImage(g.bgWin, nil)
 	roundedPanel(s, 320, 150, 960, 650, 30, color.RGBA{2, 18, 38, 235}, color.RGBA{69, 154, 222, 255})
 	drawText(s, "ALL PAIRS FOUND!", 465, 220, 7, color.RGBA{255, 205, 67, 255})
 	drawText(s, fmt.Sprintf("TIME %s", fmtMS(g.resultMS)), 590, 390, 5, color.White)
@@ -406,10 +445,12 @@ func fmtMS(ms int64) string {
 func (g *Game) Layout(_, _ int) (int, int) { return W, H }
 
 func main() {
+	g := NewGame()
+	ebiten.SetWindowIcon(g.windowIcons)
 	ebiten.SetWindowTitle("LClub - Find All Pairs")
 	ebiten.SetWindowSize(1280, 800)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	if err := ebiten.RunGame(NewGame()); err != nil && err != ebiten.Termination {
+	if err := ebiten.RunGame(g); err != nil && err != ebiten.Termination {
 		log.Fatal(err)
 	}
 }
