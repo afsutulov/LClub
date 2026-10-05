@@ -130,7 +130,7 @@ go mod build
 This project is a personal remake of my original school project.
 
 Original DOS version:
-Turbo Pascal (1998)
+Turbo Pascal (1998. Alexandr Sutulov)
 
 Modern version:
 Go + Ebitengine
