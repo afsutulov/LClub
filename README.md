@@ -1,8 +1,18 @@
 # LClub
 
+<img src="/assets/ui/icon.png" width="96" height="96" alt="LClub">
+
 **LClub** is a modern cross-platform remake of my classic DOS memory card game originally written in **Turbo Pascal** in the late 1990s.
 
 The gameplay remains faithful to the original version while the implementation has been completely rewritten in **Go** using **Ebitengine**.
+
+---
+
+## Screenshots
+
+![LClub](screenshots/screenshot1.png)
+
+![LClub](screenshots/screenshot2.png)
 
 ---
 
